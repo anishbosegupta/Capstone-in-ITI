@@ -1,0 +1,370 @@
+---
+title: "COVID-19 Vaccinations and Hesitancy Information Portal"
+output: 
+  flexdashboard::flex_dashboard:
+    logo: Logo.PNG
+    orientation: columns
+    vertical_layout: fill
+
+---
+
+```{r setup, include=FALSE,  message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(lubridate)
+library(flexdashboard)
+library(shiny)
+library(dplyr)
+library(plotly)
+library(choroplethr)
+library(choroplethrMaps)
+library(sf)
+library(tmap)
+library(leaflet)
+library(tmaptools)
+library(spData)
+library(tigris)
+library(gganimate)
+library(ggmosaic)
+library(knitr)
+library(png)
+library(viridis)
+
+
+
+```
+
+```{r data, message=FALSE, warning=FALSE, results='hide'}
+# Vaccine Willingness read file
+vaccine_willingness <- read_csv("covid-vaccine-willingness-and-people-vaccinated-by-month.csv")
+
+vaccine_willingness_usa <- vaccine_willingness %>%
+  filter(Entity == "United States")
+
+# Read file deaths by vaccination status
+deaths_vaccination_status <- read_csv("united-states-rates-of-covid-19-deaths-by-vaccination-status.csv")
+
+#Convert deaths by vaccination status to long
+deaths_vaccination_status_long <- deaths_vaccination_status %>%
+  pivot_longer(c(unvaccinated, fully_vaccinated, boosted),
+               names_to = "Vaccination Status", values_to = "Percent Deaths")
+
+
+#Read map of NJ counties
+nj_c <- counties("NJ")
+#View(nj_c)
+
+
+#read file vaccine hesitancy NJ
+vaccine_hesitancy_nj <- read_csv("Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates_NJ.csv", show_col_types = FALSE)
+
+
+#Apply some mutate
+vaccine_hesitancy_nj <- vaccine_hesitancy_nj %>%
+  mutate(NAME = map_chr(str_split(`County Name`,","),1)) %>%
+  mutate(NAME = map_chr(str_split(NAME," "),1)) %>%
+  mutate("Strongly_Hesitant" = `Estimated strongly hesitant` * 100) %>%
+  mutate("Hesitant" = `Estimated hesitant` * 100) %>%
+  mutate("Hesitant_or_Unsure" = `Estimated hesitant or unsure` * 100) %>%
+  mutate("%Adults_Fully_Vaccinated" = `Percent adults fully vaccinated against COVID-19 (as of 6/10/21)` *100) %>%
+  mutate(`Hispanic` = `Percent Hispanic` * 100) %>%
+  mutate(`Non-Hispanic American Indian/Alaska Native` = `Percent non-Hispanic American Indian/Alaska Native` * 100) %>%
+  mutate(`Non-Hispanic Asian` = `Percent non-Hispanic Asian` * 100) %>%
+  mutate(`Non-Hispanic Black` = `Percent non-Hispanic Black` * 100) %>%
+  mutate(`Non-Hispanic Native Hawaiian/Pacific Islander` = `Percent non-Hispanic Native Hawaiian/Pacific Islander` * 100) %>%
+  mutate(`Non-Hispanic White` = `Percent non-Hispanic White` * 100)
+#View(vaccine_hesitancy_nj)
+
+vaccine_hesitancy_nj_long <- vaccine_hesitancy_nj %>%
+  pivot_longer(c(Hispanic, `Non-Hispanic American Indian/Alaska Native`, `Non-Hispanic Asian`, `Non-Hispanic Black`, `Non-Hispanic Native Hawaiian/Pacific Islander`, `Non-Hispanic White`),names_to = "Ethnicity", values_to = "Vaccinations_by_Ethnicity")
+
+
+#Apply inner join to nj county map table and vaccine_hesitancy_nj
+nj_map_data <- inner_join(nj_c,vaccine_hesitancy_nj)
+#View(nj_map_data)
+
+
+#  'percent' in the vaccine_willingness_usa dataframe.
+vaccine_willingness_usa_long <- vaccine_willingness_usa %>%
+  pivot_longer(c(unwillingness_covid_vaccinate_this_week_pct_pop,uncertain_covid_vaccinate_this_week_pct_pop,willingness_covid_vaccinate_this_week_pct_pop, people_vaccinated_per_hundred), names_to = "Vaccine Willingness", values_to = "Percent"
+    )
+
+```
+
+New Jersey
+=====================================
+
+Column {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+### NJ Fully Vaccinated (6/10/2021) 
+
+```{r tmap vaccinated, message=FALSE, warning=FALSE}
+
+tm_shape(nj_map_data) +
+  tm_polygons("%Adults_Fully_Vaccinated", id = "NAME", palette = "Blues") +
+  #tm_layout("Percent NJ Pop Fully Vaccinated against COVID-19 (6/10/2021)") + 
+  tmap_mode("view")
+
+```
+
+### Strongly Vaccine Hesitant
+
+```{r tmap strongly vaccine hesitant, message=FALSE, warning=FALSE}
+
+tm_shape(nj_map_data) +
+  tm_polygons("Strongly_Hesitant", id = "NAME", palette = "Reds") +
+  #tm_layout("% New Jersey Population Strongly Vaccine Hesitant") +
+  tmap_mode("view")
+```
+
+### Vaccine Hesitant
+
+```{r tmap vaccine hesitant, message=FALSE, warning=FALSE}
+
+tm_shape(nj_map_data) +
+  tm_polygons("Hesitant", id = "NAME", palette = "Reds") +
+  tmap_mode("view")
+```
+
+### Vaccine Hesitant or Unsure
+
+```{r tmap vaccine hesitant or unsure, message=FALSE, warning=FALSE}
+
+tm_shape(nj_map_data) +
+  tm_polygons("Hesitant_or_Unsure", id = "NAME", palette = "Reds") +
+  #tm_layout("% New Jersey Population Strongly Vaccine Hesitant") +
+  tmap_mode("view")
+```
+
+Column
+-----------------------------------------------------------------------
+
+### NJ Vaccination % by Ethnicity
+
+```{r Vaccination by Ethnicity}
+vaccine_hesitancy_nj_long %>%
+  ggplot(aes(x = Vaccinations_by_Ethnicity, y = NAME, size = Vaccinations_by_Ethnicity, color = Ethnicity)) +
+  geom_point(alpha = 0.5) +
+  scale_size_continuous(range = c(1,10)) +
+  #scale_x_discrete(expand = c(0.05,0.05)) +
+  xlab("% Vaccinated") +
+  ylab("County") 
+  #theme(plot.title = element_text(hjust = 0.5),axis.text.x = element_text(angle = 90))
+  
+
+
+```
+
+### % NJ Vaccine Hesitancy by County
+
+
+```{r Hesitancy_by_County, echo=FALSE, message=FALSE, warning=FALSE}
+vaccine_hesitancy_nj_long <- vaccine_hesitancy_nj %>%
+  pivot_longer(c(`Estimated hesitant`, `Estimated hesitant or unsure`, `Estimated strongly hesitant`), names_to = "Vaccine Hesitancy", values_to = "Percent")
+
+
+vaccine_hesitancy_nj_long <- vaccine_hesitancy_nj_long %>%
+  mutate(Percent = Percent * 100)
+
+#head(vaccine_hesitancy_nj_long)
+
+```
+
+```{r hesitancy long, echo=FALSE, message=FALSE, warning=FALSE}
+vaccine_hesitancy_nj_long <- vaccine_hesitancy_nj_long %>%
+  mutate(`County Name` = map_chr(str_split(`County Name`, ","),1))
+#head(vaccine_hesitancy_nj_long)
+```
+
+
+```{r hesitancy render,echo=FALSE, message=FALSE, warning=FALSE}
+vaccine_hesitancy_nj_long %>%
+  ggplot(aes(fill =`Vaccine Hesitancy`, y = Percent, x = NAME)) + 
+  geom_bar(position="dodge", stat="identity") +
+  xlab("County") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_x_discrete(expand = c(0.05,0.05)) 
+  #ggtitle("New Jersey Vaccine Hesitancy by County")
+ggplotly()
+
+```
+
+USA/World 
+=====================================     
+   
+Column {data-width=550}
+-------------------------------------
+
+### Vaccinations Per 100 by Country
+
+```{r Vaccinations per 100 by Country,echo = FALSE, warning = FALSE}
+vaccine_willingness_animated <- vaccine_willingness %>%
+  ggplot(aes(Day, people_vaccinated_per_hundred, color = Entity)) +
+  #ggtitle("Vaccinations Per 100 by Country Jan 2021 - Jan 2022") +
+  xlab("Date") +
+  ylab("People Vaccinated Per Hundred") +
+  geom_line()# +
+  #transition_reveal(Day)
+
+vaccine_willingness_animated
+ggplotly()
+```
+
+Column {data-width=450}
+-------------------------------------
+   
+### USA People Vaccinated Per 100
+
+```{r USA People Vaccinated Per 100, echo = FALSE, warning = FALSE}
+
+vaccine_willingness_usa_animated<-vaccine_willingness_usa %>%
+  ggplot(aes(Day, people_vaccinated_per_hundred)) +
+  #ggtitle("People Vaccinated Per 100 in United States from Feb 2021 to Oct 2021") +
+  geom_line(color = "Dark Blue",  size = 2) +
+  ylab("People Vaccinated Per 100")# +
+  #transition_reveal(Day)
+
+vaccine_willingness_usa_animated
+ggplotly()
+
+```   
+    
+### Covid-19 Vaccine Willingness, United States Feb 2021 - Oct 2021
+
+```{r Vaccine wilingness USA, echo = FALSE, warning = FALSE}
+
+vaccine_willingness_usa_long %>%
+  ggplot(aes(x = Day, y = Percent, fill = `Vaccine Willingness`)) + 
+  #ggtitle("Covid-19 Vaccine Willingness, United States Feb 2021 - Oct 2021") +
+  xlab("Date") +
+  ylab("% of Population") +
+  geom_bar(stat = "identity") + 
+  scale_fill_brewer(type = "qual", palette = 1)
+  # Unvaccinated and unwilling to get vaccinated, Unvaccinated and Uncertain About Getting Vaccinated, Unvaccinated and #Willing to get Vaccinated, Vaccinated (at least 1 dose)
+ggplotly()
+```
+
+USA Vaccinations by Race
+===================================
+Column {data-width=600}
+-------------------------------------
+    
+### Vaccination status of different ethnic groups for each state, by race, 2021-2022
+    
+```{r Vaccine status ethnic groups by state}
+include_graphics("Visual1.1.png")
+```
+   
+Column {data-width=400}
+-------------------------------------
+   
+### Vaccination status of different ethnic groups in US, by race, 2021-2022
+
+```{r Vaccine status ethnic groups USA}
+include_graphics("Visual2.png")
+```   
+
+USA Deaths by Vaccination Status and Age Groups
+===================================
+Column
+-------------------------------------
+    
+### United States Covid-19 Deaths by Vaccination Status as of 1/1/2022
+    
+```{r US covid deaths by vax status, echo = FALSE, warning = FALSE}
+deaths_vaccination_status_long %>%
+  filter(Day == "1/1/2022") %>%
+  ggplot(aes(fill =`Vaccination Status`, y = `Percent Deaths`, x = Entity)) + 
+  geom_bar(position="dodge", stat="identity") +
+  xlab("Age Groups") +
+  #scale_fill_discrete(labels = c("Fully vaccinated + booster", "Fully vaccinated, no booster", "Unvaccinated")) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  scale_fill_brewer(type = "qual", palette = 3, labels = c("Fully vaccinated + booster", "Fully vaccinated, no booster", "Unvaccinated"))
+ggplotly()
+
+```
+   
+Column {.tabset .tabset-fade}
+-------------------------------------
+   
+### US Deaths by Vaccination Status All Ages
+
+```{r deaths by vaccination status all ages, echo = FALSE, warning = FALSE}
+
+deaths_vaccination_status_long %>%
+  filter(Entity == "All ages") %>%
+  mutate(Day = mdy(Day)) %>%
+  ggplot(aes(Day, `Percent Deaths`, color = `Vaccination Status`)) +
+  xlab("Day") +
+  ylab("Percent Deaths") +
+  geom_line() + 
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+ggplotly()
+```  
+
+### 18-49
+
+```{r 18-48, echo = FALSE, warning = FALSE,fig.show='hide'}
+
+deaths_vaccination_status_long %>%
+  filter(Entity == "18-49") %>%
+  mutate(Day = mdy(Day)) %>%
+  ggplot(aes(Day, `Percent Deaths`, color = `Vaccination Status`)) +
+  xlab("Day") +
+  ylab("Percent Deaths") +
+  geom_line() + 
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+ggplotly()
+```  
+
+### 50-64
+
+```{r 50-64, echo = FALSE, warning = FALSE,fig.show='hide'}
+
+deaths_vaccination_status_long %>%
+  filter(Entity == "50-64") %>%
+  mutate(Day = mdy(Day)) %>%
+  ggplot(aes(Day, `Percent Deaths`, color = `Vaccination Status`)) +
+  xlab("Day") +
+  ylab("Percent Deaths") +
+  geom_line() + 
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+ggplotly()
+```  
+
+### 65+
+
+```{r 65+, echo = FALSE, warning = FALSE,fig.show='hide'}
+
+deaths_vaccination_status_long %>%
+  filter(Entity == "65+") %>%
+  mutate(Day = mdy(Day)) %>%
+  ggplot(aes(Day, `Percent Deaths`, color = `Vaccination Status`)) +
+  xlab("Day") +
+  ylab("Percent Deaths") +
+  geom_line() + 
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+ggplotly()
+```  
+
+Sources
+===========================
+
+https://data.cdc.gov/Vaccinations/Vaccine-Hesitancy-for-COVID-19-County-and-local-es/q9mh-h2tw/data
+
+https://ourworldindata.org/grapher/covid-vaccine-willingness-and-people-vaccinated-by-month?tab=table&country=~USA
+
+https://ourworldindata.org/covid-deaths-by-vaccination
+
+https://ourworldindata.org/attitudes-to-covid-vaccinations
+
+https://www.imf.org/en/Publications/WP/Issues/2021/05/06/Who-Doesnt-Want-to-be-Vaccinated-Determinants-of-Vaccine-Hesitancy-During-COVID-19-50244
+
+https://www.imperial.ac.uk/media/imperial-college/institute-of-global-health-innovation/USA_ICL-YouGov-Covid-19-Behaviour-Tracker_20200604_NT_vF.pdf
+
+https://data.world/covid-19-data-resource-hub/covid-19-case-counts/workspace/file?filename=COVID-19+Activity.csv
+
+
